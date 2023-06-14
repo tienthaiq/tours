@@ -1,0 +1,41 @@
+version: "3.7"
+
+services:
+  mysql:
+    image: docker.io/bitnami/mysql:8.0
+    container_name: starrocks-ext-mysql
+    networks:
+      - starrocks
+    ports:
+      - 3306:3306
+    volumes:
+      - data-mysql:/bitnami/mysql/data
+      - ./mysql:/docker-entrypoint-initdb.d:ro
+    environment:
+      - MYSQL_ROOT_PASSWORD=M!Secr3t
+    healthcheck:
+      test: ['CMD', '/opt/bitnami/scripts/mysql/healthcheck.sh']
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  postgres:
+    image: docker.io/bitnami/postgresql:15
+    container_name: starrocks-ext-postgres
+    networks:
+      - starrocks
+    ports:
+      - 5432:5432
+    volumes:
+      - data-postgres:/bitnami/postgresql
+      - ./postgresql:/docker-entrypoint-initdb.d:ro
+    environment:
+      - POSTGRESQL_PASSWORD=M!Secr3t
+
+volumes:
+  data-mysql:
+  data-postgres:
+
+networks:
+  starrocks:
+    external: true

@@ -1,0 +1,97 @@
+version: "3.7"
+
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2023-06-09T07-32-12Z
+    container_name: starrocks-minio
+    networks:
+      - starrocks
+    ports:
+    - 9000:9000
+    - 9001:9001
+    volumes:
+    - data-minio:/data
+    environment:
+    - MINIO_ROOT_USER=admin
+    - MINIO_ROOT_PASSWORD=M!Secr3t
+    command: server /data --console-address :9001
+    healthcheck:
+      test: curl --fail http://localhost:9000/minio/health/ready || exit 1
+      interval: 10s
+      retries: 5
+      start_period: 10s
+      timeout: 10s
+
+  starrocks-fe:
+    image: starrocks/fe-ubuntu:3.0.1
+    hostname: starrocks-fe
+    container_name: starrocks-fe
+    networks:
+      starrocks:
+    command: /opt/starrocks/fe/bin/start_fe.sh
+    ports:
+      - 1030:8030
+      - 2020:9020
+      - 3030:9030
+    volumes:
+      - ./config/fe.conf:/opt/starrocks/fe/conf/fe.conf:ro
+      - data-fe:/opt/starrocks/fe/meta
+    depends_on:
+      - minio
+
+  starrocks-be1:
+    image: starrocks/be-ubuntu:3.0.1
+    networks:
+      starrocks:
+    command: /opt/starrocks/be/bin/start_be.sh  --logconsole
+    hostname: starrocks-be1
+    container_name: starrocks-be1
+    depends_on:
+      - "starrocks-fe"
+    volumes:
+      - ./config/be.conf:/opt/starrocks/be/conf/be.conf:ro
+      - data-be1:/opt/starrocks/be/storage
+    healthcheck:
+      test: curl --fail http://localhost:8060/health || exit 1
+      interval: 10s
+      retries: 5
+      start_period: 10s
+      timeout: 10s
+  
+  starrocks-be2:
+    image: starrocks/be-ubuntu:3.0.1
+    networks:
+      starrocks:
+    command: /opt/starrocks/be/bin/start_be.sh  --logconsole
+    hostname: starrocks-be2
+    container_name: starrocks-be2
+    depends_on:
+      - "starrocks-fe"
+    volumes:
+      - ./config/be.conf:/opt/starrocks/be/conf/be.conf:ro
+      - data-be2:/opt/starrocks/be/storage
+  
+  starrocks-be3:
+    image: starrocks/be-ubuntu:3.0.1
+    networks:
+      starrocks:
+    command: /opt/starrocks/be/bin/start_be.sh  --logconsole
+    hostname: starrocks-be3
+    container_name: starrocks-be3
+    depends_on:
+      - "starrocks-fe"
+    volumes:
+      - ./config/be.conf:/opt/starrocks/be/conf/be.conf:ro
+      - data-be3:/opt/starrocks/be/storage
+
+volumes:
+  data-minio:
+  data-fe:
+  data-be1:
+  data-be2:
+  data-be3:
+
+networks:
+  starrocks:
+    name: starrocks
+  
