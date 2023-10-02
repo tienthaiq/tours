@@ -1,0 +1,6 @@
+repositories:
+- name: starrocks
+  url: https://starrocks.github.io/helm-charts
+
+helmfiles:
+- path: starrocks/helmfile.yaml

@@ -1,0 +1,7 @@
+releases:
+- name: starrocks
+  namespace: starrocks
+  chart: starrocks/kube-starrocks
+  version: 1.6.1
+  values:
+  - ./values.yaml
