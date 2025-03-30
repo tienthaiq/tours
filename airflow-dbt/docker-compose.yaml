@@ -1,26 +1,27 @@
-version: '3.8'
 x-airflow-common:
   &airflow-common
-  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.6.3}
-  # build: .
+  # image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.10.5}
+  build: .
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    # For backward compatibility, with Airflow <2.3
-    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: M!Secr3t
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__COSMOS__DBT_DOCS_DIR: "s3://airflow-dbt/dbt/docs"
+    AIRFLOW__COSMOS__DBT_DOCS_CONN_ID: "minio"
+    # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+    - ${AIRFLOW_PROJ_DIR:-.}/dbt:/opt/dbt
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -31,10 +32,11 @@ x-airflow-common:
 
 services:
   postgres:
-    image: postgres:15
+    image: postgres:17
+    container_name: airflow-dbt-airflow-postgres
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
+      POSTGRES_USER: ${AIRFLOW_POSTGRESQL_USERNAME:?}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRESQL_PASSWORD:?}
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
@@ -43,10 +45,10 @@ services:
       interval: 10s
       retries: 5
       start_period: 5s
-    restart: unless-stopped
 
   redis:
-    image: redis:latest
+    image: redis:7.2-bookworm
+    container_name: airflow-dbt-airflow-redis
     expose:
       - 6379
     healthcheck:
@@ -55,10 +57,10 @@ services:
       timeout: 30s
       retries: 50
       start_period: 30s
-    restart: unless-stopped
 
   airflow-webserver:
     <<: *airflow-common
+    container_name: airflow-dbt-airflow-webserver
     command: webserver
     ports:
       - "8080:8080"
@@ -68,7 +70,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: unless-stopped
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -76,6 +77,7 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
+    container_name: airflow-dbt-airflow-scheduler
     command: scheduler
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
@@ -83,7 +85,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: unless-stopped
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -91,11 +92,12 @@ services:
 
   airflow-worker:
     <<: *airflow-common
+    container_name: airflow-dbt-airflow-worker
     command: celery worker
     healthcheck:
       test:
         - "CMD-SHELL"
-        - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
       interval: 30s
       timeout: 10s
       retries: 5
@@ -105,7 +107,6 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
-    restart: unless-stopped
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -113,6 +114,7 @@ services:
 
   airflow-triggerer:
     <<: *airflow-common
+    container_name: airflow-dbt-airflow-triggerer
     command: triggerer
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
@@ -120,7 +122,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: unless-stopped
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -128,25 +129,12 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    container_name: airflow-dbt-airflow-init
     entrypoint: /bin/bash
     # yamllint disable rule:line-length
     command:
       - -c
       - |
-        function ver() {
-          printf "%04d%04d%04d%04d" $${1//./ }
-        }
-        airflow_version=$$(AIRFLOW__LOGGING__LOGGING_LEVEL=INFO && gosu airflow airflow version)
-        airflow_version_comparable=$$(ver $${airflow_version})
-        min_airflow_version=2.2.0
-        min_airflow_version_comparable=$$(ver $${min_airflow_version})
-        if (( airflow_version_comparable < min_airflow_version_comparable )); then
-          echo
-          echo -e "\033[1;31mERROR!!!: Too old Airflow version $${airflow_version}!\e[0m"
-          echo "The minimum Airflow version supported: $${min_airflow_version}. Only use this or higher!"
-          echo
-          exit 1
-        fi
         if [[ -z "${AIRFLOW_UID}" ]]; then
           echo
           echo -e "\033[1;33mWARNING!!!: AIRFLOW_UID not set!\e[0m"
@@ -195,10 +183,10 @@ services:
     # yamllint enable rule:line-length
     environment:
       <<: *airflow-common-env
-      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_DB_MIGRATE: 'true'
       _AIRFLOW_WWW_USER_CREATE: 'true'
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_WEBSERVER_USERNAME:?}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_WEBSERVER_PASSWORD:?}
       _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
     volumes:
@@ -206,6 +194,7 @@ services:
 
   airflow-cli:
     <<: *airflow-common
+    container_name: airflow-dbt-airflow-cli
     profiles:
       - debug
     environment:
@@ -222,6 +211,7 @@ services:
   # See: https://docs.docker.com/compose/profiles/
   flower:
     <<: *airflow-common
+    container_name: airflow-dbt-airflow-flower
     command: celery flower
     profiles:
       - flower
@@ -233,11 +223,62 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: unless-stopped
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
 
+  dwh:
+    image: docker.io/bitnami/postgresql:17
+    container_name: airflow-dbt-dwh
+    ports:
+      - 5432:5432
+    volumes:
+      - dwh-volume:/bitnami/postgresql
+      - ./datasets/postgresql:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRESQL_USERNAME: ${DWH_USERNAME:?}
+      POSTGRESQL_PASSWORD: ${DWH_PASSWORD:?}
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: airflow-dbt-minio
+    ports:
+      - 9000:9000
+      - 9001:9001
+    volumes:
+      - minio-volume:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USERNAME:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    command: server /data --console-address :9001
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio-setup:
+    image: minio/mc
+    container_name: airflow-dbt-minio-setup
+    depends_on:
+      - minio
+    environment:
+      AIRFLOW_ACCESS_KEY: ${AIRFLOW_S3_ACCESS_KEY:?}
+      AIRFLOW_SECRET_KEY: ${AIRFLOW_S3_SECRET_KEY:?} 
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USERNAME:?}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
+      BUCKET_NAME: ${AIRFLOW_S3_BUCKET_NAME:?}
+    entrypoint: /bin/bash
+    command:
+    - -c
+    - |
+      mc alias set minio http://minio:9000 $$AWS_ACCESS_KEY_ID $$AWS_SECRET_ACCESS_KEY --api S3v4;
+      mc admin user add minio $$AIRFLOW_ACCESS_KEY $$AIRFLOW_SECRET_KEY;
+      mc admin policy attach minio readwrite --user $$AIRFLOW_ACCESS_KEY;
+      mc mb minio/$$BUCKET_NAME;
+
 volumes:
   postgres-db-volume:
+  dwh-volume:
+  minio-volume:

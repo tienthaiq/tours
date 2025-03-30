@@ -1,0 +1,30 @@
+version: 2
+
+models:
+- name: cross_shop_rental
+  description: "Count of rentals occurred in place different from customer's first store."
+  columns:
+  - name: cross_shop_rental_count
+    description: "Count of rentals occurred in store different from customer's first store."
+    data_tests:
+    - not_null
+  - name: cross_city_rental_count
+    description: "Count of rentals occurred in different city from customer's living city."
+    data_tests:
+    - not_null
+- name: revenue
+  description: "Aggregated daily revenue per district."
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      combination_of_columns:
+        - metrics_date
+        - city
+        - district
+  columns:
+  - name: metrics_date
+    description: "Revenue measure date."
+  - name: city
+  - name: district
+  - name: revenue
+  - name: rental_count
+  - name: avg_revenue_per_rental

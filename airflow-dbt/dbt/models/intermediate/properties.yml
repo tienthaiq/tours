@@ -1,0 +1,9 @@
+version: 2
+
+models:
+- name: dim_customer
+  description: "Rental customer."
+- name: dim_store
+  description: "Rental store."
+- name: fct_rental
+  description: "Rental records."
