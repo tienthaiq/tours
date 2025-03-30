@@ -1,0 +1,17 @@
+version: 2
+
+models:
+- name: sakila__address
+  description: "Staging model for table sakila.address."
+- name: sakila__city
+  description: "Staging model for table sakila.city."
+- name: sakila__country
+  description: "Staging model for table sakila.country."
+- name: sakila__inventory
+  description: "Staging model for table sakila.inventory."
+- name: sakila__rental
+  description: "Staging model for table sakila.rental."
+- name: sakila__customer
+  description: "Staging model for table saklia.customer."
+- name: sakila__store
+  description: "Staging model for table saklia.store."
