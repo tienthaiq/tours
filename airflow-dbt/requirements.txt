@@ -4,3 +4,4 @@ apache-airflow==2.10.5
 astronomer-cosmos==1.8.2
 opentelemetry-api>=1.28.0
 opentelemetry-exporter-otlp>=1.28.0
+openmetadata-ingestion[airflow,postgres,dbt]==1.7.0

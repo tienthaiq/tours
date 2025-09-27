@@ -5,8 +5,8 @@ x-airflow-common:
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRESQL_USERNAME:?}:${AIRFLOW_POSTGRESQL_PASSWORD:?}@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_POSTGRESQL_USERNAME:?}:${AIRFLOW_POSTGRESQL_PASSWORD:?}@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
@@ -32,23 +32,40 @@ x-airflow-common:
 
 services:
   postgres:
-    image: postgres:17
-    container_name: airflow-dbt-airflow-postgres
-    environment:
-      POSTGRES_USER: ${AIRFLOW_POSTGRESQL_USERNAME:?}
-      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRESQL_PASSWORD:?}
-      POSTGRES_DB: airflow
+    image: docker.io/bitnami/postgresql:17
+    container_name: airflow-dbt-postgres
+    networks:
+      - airflow-dbt
     volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
+      - postgres-db-volume:/bitnami/postgresql
+    environment:
+      POSTGRESQL_USERNAME: ${PG_ADMIN_USERNAME:?}
+      POSTGRESQL_PASSWORD: ${PG_ADMIN_PASSWORD:?}
+      POSTGRESQL_POSTGRES_PASSWORD: ${PG_ROOT_PASSWORD:?}
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
       retries: 5
       start_period: 5s
 
+  postgres-init:
+    image: alpine/psql:17.4
+    container_name: airflow-dbt-postgres-init
+    networks:
+      - airflow-dbt
+    volumes:
+      - ./scripts/postgresql:/scripts:ro
+    environment:
+      PGPASSWORD: ${PG_ROOT_PASSWORD:?}
+    command: ["-h", "postgres", "-U", "postgres", "-f", "/scripts/1-init_airflow.sql", "-f", "/scripts/2-init_openmetadata.sql"]
+    depends_on:
+      - postgres
+
   redis:
     image: redis:7.2-bookworm
     container_name: airflow-dbt-airflow-redis
+    networks:
+      - airflow-dbt
     expose:
       - 6379
     healthcheck:
@@ -61,6 +78,8 @@ services:
   airflow-webserver:
     <<: *airflow-common
     container_name: airflow-dbt-airflow-webserver
+    networks:
+      - airflow-dbt
     command: webserver
     ports:
       - "8080:8080"
@@ -78,6 +97,8 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     container_name: airflow-dbt-airflow-scheduler
+    networks:
+      - airflow-dbt
     command: scheduler
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
@@ -93,6 +114,8 @@ services:
   airflow-worker:
     <<: *airflow-common
     container_name: airflow-dbt-airflow-worker
+    networks:
+      - airflow-dbt
     command: celery worker
     healthcheck:
       test:
@@ -115,6 +138,8 @@ services:
   airflow-triggerer:
     <<: *airflow-common
     container_name: airflow-dbt-airflow-triggerer
+    networks:
+      - airflow-dbt
     command: triggerer
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
@@ -130,6 +155,8 @@ services:
   airflow-init:
     <<: *airflow-common
     container_name: airflow-dbt-airflow-init
+    networks:
+      - airflow-dbt
     entrypoint: /bin/bash
     # yamllint disable rule:line-length
     command:
@@ -195,6 +222,8 @@ services:
   airflow-cli:
     <<: *airflow-common
     container_name: airflow-dbt-airflow-cli
+    networks:
+      - airflow-dbt
     profiles:
       - debug
     environment:
@@ -212,6 +241,8 @@ services:
   flower:
     <<: *airflow-common
     container_name: airflow-dbt-airflow-flower
+    networks:
+      - airflow-dbt
     command: celery flower
     profiles:
       - flower
@@ -231,18 +262,36 @@ services:
   dwh:
     image: docker.io/bitnami/postgresql:17
     container_name: airflow-dbt-dwh
+    networks:
+      - airflow-dbt
     ports:
-      - 5432:5432
+      - 5434:5432
     volumes:
       - dwh-volume:/bitnami/postgresql
-      - ./datasets/postgresql:/docker-entrypoint-initdb.d:ro
+      - ./scripts/dwh/0-dvdrental.sql:/docker-entrypoint-initdb.d/0-dvdrental.sql:ro
     environment:
       POSTGRESQL_USERNAME: ${DWH_USERNAME:?}
       POSTGRESQL_PASSWORD: ${DWH_PASSWORD:?}
+      POSTGRESQL_POSTGRES_PASSWORD: ${PG_ROOT_PASSWORD:?}
+  
+  dwh-init:
+    image: alpine/psql:17.4
+    container_name: airflow-dbt-dwh-init
+    networks:
+      - airflow-dbt
+    volumes:
+      - ./scripts/dwh/1-init_dbt.sql:/scripts/1-init_dbt.sql:ro
+    environment:
+      PGPASSWORD: ${PG_ROOT_PASSWORD:?}
+    command: ["-h", "dwh", "-U", "postgres", "-f", "/scripts/1-init_dbt.sql"]
+    depends_on:
+      - dwh
 
   minio:
     image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
     container_name: airflow-dbt-minio
+    networks:
+      - airflow-dbt
     ports:
       - 9000:9000
       - 9001:9001
@@ -261,6 +310,8 @@ services:
   minio-setup:
     image: minio/mc
     container_name: airflow-dbt-minio-setup
+    networks:
+      - airflow-dbt
     depends_on:
       - minio
     environment:
@@ -282,3 +333,7 @@ volumes:
   postgres-db-volume:
   dwh-volume:
   minio-volume:
+  
+networks:
+  airflow-dbt:
+    name: airflow-dbt

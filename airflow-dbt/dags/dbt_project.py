@@ -14,7 +14,7 @@ dbt_profile_config = ProfileConfig(
     profile_mapping=PostgresUserPasswordProfileMapping(
         conn_id="postgresql_dwh",
         profile_args={
-            "schema": "dwh",
+            "schema": "dbt",
         },
         dbt_config_vars=DbtProfileConfigVars(
             send_anonymous_usage_stats=False,
