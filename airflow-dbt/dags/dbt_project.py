@@ -1,7 +1,7 @@
 import datetime
 
-from airflow import DAG
-from airflow.operators.empty import EmptyOperator
+from airflow.sdk import DAG
+from airflow.providers.standard.operators.empty import EmptyOperator
 from cosmos.airflow.task_group import DbtTaskGroup
 from cosmos.config import ProjectConfig, ProfileConfig
 from cosmos.profiles import PostgresUserPasswordProfileMapping, DbtProfileConfigVars

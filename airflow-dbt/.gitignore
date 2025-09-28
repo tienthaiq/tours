@@ -179,3 +179,5 @@ logs/
 # dbt
 dbt/target
 dbt/log
+
+.env
