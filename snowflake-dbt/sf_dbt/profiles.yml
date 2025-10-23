@@ -1,0 +1,35 @@
+sf_dbt:
+  target: dev
+  outputs:
+    prod:
+      type: snowflake
+      account: "{{ env_var('DBT_SF_ACCOUNT') }}"
+      role: "{{ env_var('DBT_SF_ROLE') }}"
+      database: "{{ env_var('DBT_SF_DATABASE') }}"
+      warehouse: "{{ env_var('DBT_SF_WAREHOUSE') }}"
+      schema: public
+      user: "{{ env_var('DBT_SF_USERNAME') }}"
+      authenticator: snowflake_jwt
+      private_key_path: "{{ env_var('DBT_SF_PRIVATE_KEY_PATH') }}"
+
+    ci:
+      type: snowflake
+      account: "{{ env_var('DBT_SF_ACCOUNT') }}"
+      role: "{{ env_var('DBT_SF_ROLE') }}"
+      database: "{{ env_var('DBT_SF_DATABASE') }}_dev"
+      warehouse: "{{ env_var('DBT_SF_WAREHOUSE') }}"
+      schema: ci
+      user: "{{ env_var('DBT_SF_USERNAME') }}"
+      authenticator: snowflake_jwt
+      private_key_path: "{{ env_var('DBT_SF_PRIVATE_KEY_PATH') }}"
+
+    dev:
+      type: snowflake
+      account: "{{ env_var('DBT_SF_ACCOUNT') }}"
+      role: "{{ env_var('DBT_SF_ROLE') }}"
+      database: "{{ env_var('DBT_SF_DATABASE') }}_dev"
+      warehouse: "{{ env_var('DBT_SF_WAREHOUSE') }}"
+      schema: dev
+      user: "{{ env_var('DBT_SF_USERNAME') }}"
+      authenticator: snowflake_jwt
+      private_key_path: "{{ env_var('DBT_SF_PRIVATE_KEY_PATH') }}"
